@@ -1,29 +1,28 @@
 import chalk from 'chalk'
-import { sendPrompt } from './lib/gpt.js'
+import { chat } from './lib/gpt.js'
 import readline from 'readline'
+import { CHAT } from './lib/constants.js'
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 })
 
 let questions = []
+let topic
 
 function initialInput() {
-  rl.question(chalk.green("What would you like to learn about? "), async function(question) {
+  rl.question(chalk.green("What would you like to learn about? "), async function(input) {
     rl.pause()
-    const prompt = `Respond in full sentences, repeating the topic if necessary. Provide some basic info about this topic: ${question}`
-    const response = await sendPrompt(prompt)
-    const trimmedResponse = response[0].text.trim()
-    questions.push(question)
+    topic = input
 
-    const followupResponses = await sendPrompt(`You were just given a topic and asked to provide basic info. Now provide a follow-up question I could ask to gain deeper knowledge. Do not prefix your response with anything like "FOLLOW-UP QUESTION:".
-    
-TOPIC: ${question}
-RESPONSE: ${trimmedResponse}`, {
-  n: 4,
-  best_of: 10,
-  temperature: 1.5
-})
+    const response = await chat([{
+      actor: CHAT.PREFIX,
+      content: `Respond in full sentences, repeating the topic if necessary. Provide some basic info about this topic: ${topic}`
+    }])
+    const trimmedResponse = response[0].message.content.trim()
+
+    const followupResponses = await getFollowups()
 
     console.log(trimmedResponse)
     console.log("\n")
@@ -35,7 +34,7 @@ RESPONSE: ${trimmedResponse}`, {
 function showFollowups(followupResponses) {
   console.log(chalk.green("To learn more, you could ask one of these questions:\n\n"))
   followupResponses.forEach((response, index) => {
-    console.log(chalk.green(`${index + 1}: ${response.text.trim()}`))
+    console.log(chalk.green(`${index + 1}: ${response.message.content.trim()}`))
   })
   console.log('\n')
 
@@ -44,8 +43,7 @@ function showFollowups(followupResponses) {
     if(isInt(selection)) {
       let question = followupResponses[parseInt(selection) - 1]
       if(question) {
-        question = question.text.trim()
-        questions.push(question)
+        question = question.message.content.trim()
         console.log(chalk.cyan(question))
         askFollowup(question)
       } else {
@@ -59,31 +57,59 @@ function showFollowups(followupResponses) {
 }
 
 async function askFollowup(followup) {
-  const response = await sendPrompt(buildPreface(questions) + followup)
+  const response = await chat([
+    {
+      actor: CHAT.PREFIX,
+      content: buildPreface(questions)
+    },
+    {
+      actor: CHAT.USER,
+      content: `Answer this new question about that topic: ${followup}`
+    }
+  ])
   questions.push(followup)
 
-  const followupResponses = await sendPrompt(`You have been given a topic and asked to answer questions about that topic. Now provide a follow-up question I could ask to gain deeper knowledge. Do not prefix your response with anything like "FOLLOW-UP QUESTION:".
-    
-  TOPIC: ${questions[0]}
-  QUESTIONS ALREADY ASKED: ${questions.slice(1).map(question => {
-    return `- ${question}`
-  })}`, {
-    n: 4,
-    best_of: 10,
-    temperature: 1.5
-  })
+  const followupResponses = await getFollowups()
 
-  console.log(response[0].text.trim() + "\n\n")
+  console.log(response[0].message.content.trim() + "\n\n")
   showFollowups(followupResponses)
 }
 
-function buildPreface(history) {
-  // Falsy check for empty array, or potential bad data
-  if(!history || history.length === 0) { return '' }
+async function getFollowups() {
+  let prompts = [{
+    actor: CHAT.PREFIX,
+    content: `You were asked to provide basic info about ${topic}, to help guide a human through understanding a new topic. You were then asked a number of follow-up questions, to which you have already responded.`
+  }]
 
-  return `You have been asked a number of questions about this topic: ${history[0]}
-  
-Please answer this new question about that topic: `
+  Array.prototype.push.apply(prompts, questions.map(question => {
+    return {
+      actor: CHAT.AI,
+      content: `I previously asked: ${question}`
+    }
+  }))
+
+  prompts.push({
+    actor: CHAT.USER,
+    content: 'Provide one follow-up question I could ask to gain deeper knowledge. Do not wrap the response in any characters like quotes, or prefix the question with anything conversational.'
+  })
+
+  return await chat(prompts, {
+    n: 4,
+    temperature: 1.5
+  })
+}
+
+function buildPreface() {
+  // Falsy check for empty array, or potential bad data
+  if(!questions || questions.length === 0) { return '' }
+
+  return `You have been asked a number of questions about this topic: ${topic}
+
+The previous questions were: 
+${questions.map(question => {
+  return `\n    - ${question}`
+})}
+`
 }
 
 function isInt(value) {
