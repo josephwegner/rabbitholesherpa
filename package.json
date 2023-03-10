@@ -1,0 +1,20 @@
+{
+  "name": "openai",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "learn": "node -r dotenv/config learn.js",
+    "prompt": "node -r dotenv/config prompt.js"
+  },
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "chalk": "^5.2.0",
+    "dotenv": "^16.0.3"
+  },
+  "dependencies": {
+    "openai": "^3.2.0"
+  }
+}
